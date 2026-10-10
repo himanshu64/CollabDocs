@@ -8,7 +8,6 @@ from django.utils.dateparse import parse_date
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
-from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 
 from .models import AuditLog, Comment, Document, DocumentVersion, Tag, User, Workspace, WorkspaceMember
@@ -156,9 +155,9 @@ class DocumentViewSet(viewsets.ModelViewSet):
             return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
+        # The document UPDATE row-locks it until commit, and _add_version counts only after the save,
+        # so concurrent saves queue up and get distinct version numbers (see ConcurrentVersionTests).
         with transaction.atomic():
-            # Row lock so concurrent saves can't compute the same version_number.
-            get_object_or_404(Document.objects.select_for_update(), pk=kwargs['pk'])
             return super().update(request, *args, **kwargs)
 
     def perform_create(self, serializer):

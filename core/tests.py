@@ -1,4 +1,10 @@
-from rest_framework.test import APITestCase
+import threading
+import time
+from unittest.mock import patch
+
+from django.db import connection
+from django.test import TransactionTestCase
+from rest_framework.test import APIClient, APITestCase
 
 from .models import AuditLog, DocumentVersion, Workspace, WorkspaceMember
 
@@ -95,3 +101,41 @@ class CollabDocsFlowTests(APITestCase):
         self.assertEqual(thread[0]['replies'][0]['content'], 'reply')
         self.assertEqual(thread[0]['replies'][0]['replies'][0]['content'], 'nested')
         self.assertEqual(self.client.get('/api/comments/?document=bad').status_code, 400)
+
+
+class ConcurrentVersionTests(TransactionTestCase):
+    """Real concurrent transactions (needs TransactionTestCase, not APITestCase)."""
+
+    def test_concurrent_updates_get_unique_version_numbers(self):
+        client = APIClient()
+        owner = client.post('/api/users/', {'first_name': 'A', 'last_name': 'B', 'email': 'a@x.io',
+                                            'phone': '9000000001'}).data['id']
+        ws = client.post('/api/workspaces/', {'name': 'WS', 'owner': owner}, format='json').data['id']
+        body = {'title': 'Doc', 'content': 'v1', 'workspace': ws, 'created_by': owner}
+        doc = client.post('/api/documents/', body).data['id']
+
+        start = threading.Barrier(5)
+
+        def save(n):
+            try:
+                start.wait()
+                APIClient().put(f'/api/documents/{doc}/', {**body, 'content': f'edit {n}'})
+            finally:
+                connection.close()
+
+        # Pause between computing version_number and inserting it, so unlocked saves would collide.
+        create = DocumentVersion.objects.create
+
+        def slow_create(**kwargs):
+            time.sleep(0.1)
+            return create(**kwargs)
+
+        threads = [threading.Thread(target=save, args=(n,)) for n in range(5)]
+        with patch.object(DocumentVersion.objects, 'create', slow_create):
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        numbers = sorted(DocumentVersion.objects.filter(document=doc).values_list('version_number', flat=True))
+        self.assertEqual(numbers, [1, 2, 3, 4, 5, 6])
