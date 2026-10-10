@@ -10,9 +10,26 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import AuditLog, Comment, Document, DocumentVersion, Tag, User, Workspace, WorkspaceMember
-from .serializers import (AuditLogSerializer, CommentSerializer, DocumentSerializer, DocumentVersionSerializer,
-                          MemberSerializer, TagSerializer, UserSerializer, WorkspaceSerializer)
+from .models import (
+    AuditLog,
+    Comment,
+    Document,
+    DocumentVersion,
+    Tag,
+    User,
+    Workspace,
+    WorkspaceMember,
+)
+from .serializers import (
+    AuditLogSerializer,
+    CommentSerializer,
+    DocumentSerializer,
+    DocumentVersionSerializer,
+    MemberSerializer,
+    TagSerializer,
+    UserSerializer,
+    WorkspaceSerializer,
+)
 
 
 def uuid_param(request, name):

@@ -1,6 +1,7 @@
 import re
 
 from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 
 from .models import AuditLog, Comment, Document, DocumentVersion, Tag, User, Workspace, WorkspaceMember
 
@@ -9,6 +10,9 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'first_name', 'last_name', 'email', 'phone', 'created_at']
+        # Validators run before validate_email lowercases the value, so match case-insensitively.
+        extra_kwargs = {'email': {'validators': [UniqueValidator(
+            queryset=User.objects.all(), lookup='iexact', message='A user with this email already exists.')]}}
 
     def validate_email(self, value):
         value = value.strip().lower()
@@ -45,6 +49,12 @@ class WorkspaceSerializer(serializers.ModelSerializer):
         if not value.strip():
             raise serializers.ValidationError('Workspace name cannot be blank.')
         return value.strip()
+
+    def validate_members(self, value):
+        if self.instance is not None:
+            raise serializers.ValidationError('Members can only be set when creating a workspace; '
+                                              'use POST /api/workspaces/{id}/members/ instead.')
+        return value
 
 
 class DocumentSerializer(serializers.ModelSerializer):

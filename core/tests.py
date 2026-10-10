@@ -72,6 +72,14 @@ class CollabDocsFlowTests(APITestCase):
         r = self.client.post('/api/comments/', {'document': doc, 'author': self.owner, 'content': 'hi'})
         self.assertEqual(r.status_code, 400)
 
+    def test_invalid_writes_return_400_not_500(self):
+        r = self.client.post('/api/users/', {'first_name': 'U', 'last_name': '3', 'email': 'U1@X.io',
+                                             'phone': '900000003'})
+        self.assertEqual(r.status_code, 400)
+        r = self.client.patch(f'/api/workspaces/{self.ws}/', {'members': [{'user': self.other, 'role': 'editor'}]},
+                              format='json')
+        self.assertEqual(r.status_code, 400)
+
     def test_viewer_cannot_create_document(self):
         self.client.post(f'/api/workspaces/{self.ws}/members/', {'user': self.other, 'role': 'viewer'})
         r = self.client.post('/api/documents/', {'title': 'D', 'content': 'c', 'workspace': self.ws,

@@ -39,7 +39,7 @@ class WorkspaceMember(models.Model):
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=['workspace', 'user'], name='unique_workspace_member')]
+        constraints = (models.UniqueConstraint(fields=['workspace', 'user'], name='unique_workspace_member'),)
 
 
 class Document(models.Model):
