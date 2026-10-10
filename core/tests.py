@@ -41,6 +41,15 @@ class CollabDocsFlowTests(APITestCase):
         actions = list(AuditLog.objects.filter(object_id=doc).order_by('timestamp').values_list('action', flat=True))
         self.assertEqual(actions, ['created', 'updated'])
         self.assertEqual(self.client.get(f'/api/documents/{doc}/stats/').data['version_count'], 2)
+        self.assertEqual(self.client.delete(f'/api/documents/{doc}/').status_code, 204)
+        self.assertTrue(AuditLog.objects.filter(object_id=doc, action='deleted').exists())
+
+    def test_workspace_and_member_changes_are_audited(self):
+        self.client.post(f'/api/workspaces/{self.ws}/members/', {'user': self.other, 'role': 'editor'})
+        self.client.post(f'/api/workspaces/{self.ws}/members/', {'user': self.other, 'role': 'editor'})  # 409
+        logs = AuditLog.objects.exclude(model_name='Document')
+        self.assertEqual(sorted(logs.values_list('model_name', 'action')),
+                         [('Workspace', 'created'), ('WorkspaceMember', 'member_added')])
 
     def test_workspace_and_creator_are_immutable(self):
         other_ws = self.client.post('/api/workspaces/', {'name': 'WS2', 'owner': self.owner}).data['id']

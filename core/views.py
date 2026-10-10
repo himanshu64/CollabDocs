@@ -26,6 +26,11 @@ def uuid_param(request, name):
         raise ValidationError({name: f'"{value}" is not a valid UUID.'})
 
 
+def audit(actor, action, obj):
+    """Call inside the same transaction.atomic() as the change it records."""
+    AuditLog.objects.create(actor=actor, action=action, model_name=type(obj).__name__, object_id=str(obj.pk))
+
+
 def date_param(request, name):
     value = request.query_params.get(name)
     if value is None:
@@ -68,6 +73,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
                                                role=WorkspaceMember.Role.ADMIN)
                 for member in members:
                     WorkspaceMember.objects.create(workspace=workspace, **member)
+                audit(workspace.owner, 'created', workspace)
         except IntegrityError:
             return Response({'detail': 'A user appears more than once in this workspace (the owner is added '
                                        'automatically). The whole request was rolled back.'},
@@ -77,8 +83,10 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         # Soft delete: keeps documents and history; inactive workspaces reject new content.
-        instance.is_active = False
-        instance.save(update_fields=['is_active'])
+        with transaction.atomic():
+            instance.is_active = False
+            instance.save(update_fields=['is_active'])
+            audit(None, 'deactivated', instance)
 
     @action(detail=True, methods=['get', 'post'])
     def members(self, request, pk=None):
@@ -98,7 +106,7 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         try:
             with transaction.atomic():
-                serializer.save(workspace=workspace)
+                audit(None, 'member_added', serializer.save(workspace=workspace))
         except IntegrityError:
             return Response({'detail': 'User is already a member of this workspace.'},
                             status=status.HTTP_409_CONFLICT)
@@ -158,6 +166,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._add_version(serializer.save())
+
+    def perform_destroy(self, instance):
+        with transaction.atomic():
+            audit(None, 'deleted', instance)
+            instance.delete()
 
     @staticmethod
     def _add_version(document):
