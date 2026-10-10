@@ -18,6 +18,12 @@ cp .env.example .env          # then fill in your DB credentials and a SECRET_KE
 createdb collabdocs           # or create the database named in DB_NAME
 ```
 
+No local PostgreSQL? `docker-compose.yml` runs one with the credentials from `.env`. Use it instead of `createdb`:
+
+```bash
+docker compose up -d db
+```
+
 ## Apply migrations
 
 ```bash
