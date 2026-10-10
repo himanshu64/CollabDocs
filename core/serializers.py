@@ -64,7 +64,11 @@ class DocumentSerializer(serializers.ModelSerializer):
         workspace = attrs.get('workspace') or self.instance.workspace
         if not workspace.is_active:
             raise serializers.ValidationError({'workspace': 'This workspace is inactive.'})
-        if self.instance is None:
+        if self.instance is not None:
+            for field in ('workspace', 'created_by'):
+                if field in attrs and attrs[field] != getattr(self.instance, field):
+                    raise serializers.ValidationError({field: 'This field cannot be changed after creation.'})
+        else:
             creator = attrs.get('created_by')
             if creator is None:
                 raise serializers.ValidationError({'created_by': 'This field is required.'})
@@ -99,6 +103,8 @@ class CommentSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         document = attrs.get('document') or self.instance.document
+        if not document.workspace.is_active:
+            raise serializers.ValidationError({'document': "This document's workspace is inactive."})
         parent = attrs.get('parent')
         if parent and parent.document_id != document.id:
             raise serializers.ValidationError({'parent': 'Parent comment belongs to a different document.'})

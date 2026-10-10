@@ -42,6 +42,21 @@ class CollabDocsFlowTests(APITestCase):
         self.assertEqual(actions, ['created', 'updated'])
         self.assertEqual(self.client.get(f'/api/documents/{doc}/stats/').data['version_count'], 2)
 
+    def test_workspace_and_creator_are_immutable(self):
+        other_ws = self.client.post('/api/workspaces/', {'name': 'WS2', 'owner': self.owner}).data['id']
+        body = {'title': 'Doc', 'content': 'c', 'workspace': self.ws, 'created_by': self.owner}
+        doc = self.client.post('/api/documents/', body).data['id']
+        self.assertEqual(self.client.put(f'/api/documents/{doc}/', {**body, 'workspace': other_ws}).status_code, 400)
+        self.assertEqual(self.client.put(f'/api/documents/{doc}/', {**body, 'created_by': self.other}).status_code, 400)
+
+    def test_workspace_delete_is_soft_and_blocks_new_content(self):
+        doc = self.client.post('/api/documents/', {'title': 'D', 'content': 'c', 'workspace': self.ws,
+                                                   'created_by': self.owner}).data['id']
+        self.assertEqual(self.client.delete(f'/api/workspaces/{self.ws}/').status_code, 204)
+        self.assertFalse(Workspace.objects.get(pk=self.ws).is_active)
+        r = self.client.post('/api/comments/', {'document': doc, 'author': self.owner, 'content': 'hi'})
+        self.assertEqual(r.status_code, 400)
+
     def test_viewer_cannot_create_document(self):
         self.client.post(f'/api/workspaces/{self.ws}/members/', {'user': self.other, 'role': 'viewer'})
         r = self.client.post('/api/documents/', {'title': 'D', 'content': 'c', 'workspace': self.ws,

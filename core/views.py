@@ -74,6 +74,11 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         workspace = self.get_queryset().get(pk=workspace.pk)
         return Response(self.get_serializer(workspace).data, status=status.HTTP_201_CREATED)
 
+    def perform_destroy(self, instance):
+        # Soft delete: keeps documents and history; inactive workspaces reject new content.
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+
     @action(detail=True, methods=['get', 'post'])
     def members(self, request, pk=None):
         workspace = self.get_object()
@@ -180,6 +185,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def tags(self, request, pk=None):
         document = self.get_object()
+        if not document.workspace.is_active:
+            return Response({'detail': "This document's workspace is inactive."}, status=status.HTTP_400_BAD_REQUEST)
         tag_ids = request.data.get('tag_ids')
         if not isinstance(tag_ids, list) or not tag_ids:
             return Response({'detail': 'tag_ids must be a non-empty list of tag IDs.'},
