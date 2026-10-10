@@ -74,21 +74,21 @@ List endpoints are paginated (20 per page): the response is `{"count", "next", "
 
 ## How the integrity requirements are met
 
-- **Workspace creation**: workspace, owner membership (role `admin`) and any extra `members` are created inside one `transaction.atomic()`. A duplicate member violates the `unique_workspace_member` constraint, the `IntegrityError` is caught, the response is `409`, and nothing is saved.
-- **Document saves**: `create()` and `update()` wrap the save, the new `DocumentVersion` (`version_number = document.versions.count() + 1`) and the `AuditLog` written by the `post_save` signal in one atomic block. Concurrent updates still get distinct version numbers: the document `UPDATE` row-locks it until commit, and versions are counted after the save. `ConcurrentVersionTests` checks this with 5 simultaneous saves.
-- **Audit signal** (`core/signals.py`, connected in `CoreConfig.ready()`): Django sets `_state.adding` to `False` before `post_save` fires, so a `pre_save` receiver records `instance._state.adding` and the `post_save` receiver uses it to log `created` or `updated`.
-- **Other audit entries**: workspace creation and deactivation, member adds and document deletes are also logged, each in the same atomic block as its change. Without authentication the actor is only known for workspace creation (the owner); the other entries have a null actor.
+- Creating a workspace runs in one `transaction.atomic()`: the workspace, the owner's `admin` membership and any extra `members`. A duplicate member violates the `unique_workspace_member` constraint, the view catches the `IntegrityError` and returns `409`, and nothing is saved.
+- Document `create()` and `update()` wrap the save, the new `DocumentVersion` (`version_number = document.versions.count() + 1`) and the `AuditLog` written by the `post_save` signal in one atomic block. Concurrent updates still get distinct version numbers: the document `UPDATE` row-locks it until commit, and versions are counted after the save. `ConcurrentVersionTests` checks this with 5 simultaneous saves.
+- The audit signal lives in `core/signals.py` and is connected in `CoreConfig.ready()`. Django sets `_state.adding` to `False` before `post_save` fires, so a `pre_save` receiver records `instance._state.adding` and the `post_save` receiver uses it to log `created` or `updated`.
+- Workspace creation and deactivation, member adds and document deletes also write audit entries, each in the same atomic block as its change. Without authentication the actor is only known for workspace creation (the owner); the other entries have a null actor.
 
 ## What could be improved
 
-- **Authentication and real permissions.** The acting user is passed by ID in the request body, so any caller can act as anyone, and most audit entries have no actor. Token/JWT auth would let the views take the actor from `request.user` and enforce roles everywhere (only admins add members, viewers can't edit or comment). Right now only document creation checks the role. This is left out because the brief's User model has no password field.
-- **Correct actor on updates.** As the brief specifies, the audit signal records `created_by` as the actor, so an edit by a collaborator is credited to the original author. An `updated_by` field (or the authenticated user) would fix both the AuditLog and `DocumentVersion.saved_by`.
-- **Filtering boilerplate.** Each viewset parses its own query params. `django-filter` would replace that with declarative `FilterSet`s. They're hand-written here because the brief asks to show `filter()` with `__gte`, `__lte`, `__in` and `__icontains` lookups.
-- **Version storage.** Each version stores the full content. Storing diffs, or capping the version history, would save space for long documents.
+- There is no authentication. The acting user is passed by ID in the request body, so any caller can act as anyone, and most audit entries have no actor. Token/JWT auth would let the views take the actor from `request.user` and enforce roles everywhere (only admins add members, viewers can't edit or comment). Right now only document creation checks the role. We left auth out because the brief's User model has no password field.
+- Edits are credited to the original author. As the brief specifies, the audit signal records `created_by` as the actor, even when a collaborator made the change. An `updated_by` field (or the authenticated user) would fix both the AuditLog and `DocumentVersion.saved_by`.
+- Each viewset parses its own query params. `django-filter` would replace that with declarative `FilterSet`s. They're hand-written here because the brief asks to show `filter()` with `__gte`, `__lte`, `__in` and `__icontains` lookups.
+- Each version stores the full content. Storing diffs, or capping the version history, would save space for long documents.
 
 ## Demo walkthrough
 
 1. Run the Users and Workspaces folders and watch the middleware lines in the server console.
-2. **Rollback:** run "Rollback demo: duplicate member -> 409, nothing saved", then "List workspaces (filter by name)", which returns `[]`.
-3. **Aggregations:** "Workspace summary" and "Document stats".
-4. **Signal:** run "Update document (new version)", then "List audit logs" to see the `updated` entry for the document.
+2. Show the rollback: run "Rollback demo: duplicate member -> 409, nothing saved", then "List workspaces (filter by name)", which returns `[]`.
+3. Show the aggregations with "Workspace summary" and "Document stats".
+4. Show the signal: run "Update document (new version)", then "List audit logs" to see the `updated` entry for the document.

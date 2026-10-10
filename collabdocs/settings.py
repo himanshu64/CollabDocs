@@ -1,6 +1,3 @@
-"""
-Django settings for collabdocs project.
-"""
 import os
 from pathlib import Path
 
