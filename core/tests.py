@@ -1,3 +1,65 @@
-from django.test import TestCase
+from rest_framework.test import APITestCase
 
-# Create your tests here.
+from .models import AuditLog, DocumentVersion, Workspace, WorkspaceMember
+
+
+class CollabDocsFlowTests(APITestCase):
+    def make_user(self, n):
+        return self.client.post('/api/users/', {'first_name': 'U', 'last_name': str(n),
+                                                'email': f'u{n}@x.io', 'phone': f'90000000{n}'}).data['id']
+
+    def setUp(self):
+        self.owner, self.other = self.make_user(1), self.make_user(2)
+        self.ws = self.client.post('/api/workspaces/', {'name': 'WS', 'owner': self.owner}, format='json').data['id']
+
+    def test_workspace_create_adds_owner_as_admin(self):
+        r = self.client.get(f'/api/workspaces/{self.ws}/')
+        self.assertEqual(r.data['member_count'], 1)
+        self.assertEqual(WorkspaceMember.objects.get(workspace=self.ws).role, 'admin')
+
+    def test_workspace_create_rolls_back_on_duplicate_member(self):
+        before = Workspace.objects.count()
+        r = self.client.post('/api/workspaces/', {'name': 'Bad', 'owner': self.owner,
+                                                  'members': [{'user': self.owner, 'role': 'editor'}]}, format='json')
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(Workspace.objects.count(), before)
+
+    def test_duplicate_member_returns_409_and_unknown_user_404(self):
+        url = f'/api/workspaces/{self.ws}/members/'
+        self.assertEqual(self.client.post(url, {'user': self.other, 'role': 'editor'}).status_code, 201)
+        self.assertEqual(self.client.post(url, {'user': self.other, 'role': 'viewer'}).status_code, 409)
+        self.assertEqual(self.client.post(url, {'user': 'nope', 'role': 'viewer'}).status_code, 404)
+        self.assertEqual(len(self.client.get(url).data), 2)
+
+    def test_document_versions_and_audit_log(self):
+        body = {'title': 'Doc', 'content': 'v1', 'workspace': self.ws, 'created_by': self.owner}
+        doc = self.client.post('/api/documents/', body).data['id']
+        self.assertEqual(self.client.put(f'/api/documents/{doc}/', {**body, 'content': 'v2'}).status_code, 200)
+        versions = self.client.get(f'/api/documents/{doc}/versions/').data
+        self.assertEqual([v['version_number'] for v in versions], [1, 2])
+        self.assertEqual([v['content'] for v in versions], ['v1', 'v2'])
+        actions = list(AuditLog.objects.filter(object_id=doc).order_by('timestamp').values_list('action', flat=True))
+        self.assertEqual(actions, ['created', 'updated'])
+        self.assertEqual(self.client.get(f'/api/documents/{doc}/stats/').data['version_count'], 2)
+
+    def test_viewer_cannot_create_document(self):
+        self.client.post(f'/api/workspaces/{self.ws}/members/', {'user': self.other, 'role': 'viewer'})
+        r = self.client.post('/api/documents/', {'title': 'D', 'content': 'c', 'workspace': self.ws,
+                                                 'created_by': self.other})
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(DocumentVersion.objects.exists())
+
+    def test_tags_and_threaded_comments(self):
+        doc = self.client.post('/api/documents/', {'title': 'Doc', 'content': 'c', 'workspace': self.ws,
+                                                   'created_by': self.owner}).data['id']
+        tag = self.client.post('/api/tags/', {'name': 'Python'}).data['id']
+        self.assertEqual(self.client.post('/api/tags/', {'name': 'python '}).status_code, 409)
+        self.client.post(f'/api/documents/{doc}/tags/', {'tag_ids': [tag]}, format='json')
+        self.assertEqual(len(self.client.get('/api/documents/?tag=python').data), 1)
+
+        top = self.client.post('/api/comments/', {'document': doc, 'author': self.owner, 'content': 'hi'}).data['id']
+        self.client.post('/api/comments/', {'document': doc, 'author': self.owner, 'content': 'reply', 'parent': top})
+        thread = self.client.get(f'/api/comments/?document={doc}').data
+        self.assertEqual(len(thread), 1)
+        self.assertEqual(thread[0]['replies'][0]['content'], 'reply')
+        self.assertEqual(self.client.get('/api/comments/?document=bad').status_code, 400)
