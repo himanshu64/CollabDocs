@@ -97,9 +97,13 @@ class CommentSerializer(serializers.ModelSerializer):
         fields = ['id', 'document', 'author', 'author_email', 'content', 'parent', 'created_at', 'replies']
 
     def get_replies(self, obj):
-        # ponytail: one query per comment level; fine for demo-sized threads, use a recursive CTE if threads get deep.
-        replies = obj.replies.select_related('author').order_by('created_at')
-        return CommentSerializer(replies, many=True).data
+        # The list view preloads every reply into context['children']; other views query directly.
+        children = self.context.get('children')
+        if children is not None:
+            replies = children.get(obj.id, [])
+        else:
+            replies = obj.replies.select_related('author').order_by('created_at')
+        return CommentSerializer(replies, many=True, context=self.context).data
 
     def validate(self, attrs):
         document = attrs.get('document') or self.instance.document

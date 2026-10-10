@@ -1,4 +1,5 @@
 import uuid
+from collections import defaultdict
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
@@ -217,6 +218,18 @@ class CommentViewSet(viewsets.ModelViewSet):
             qs = qs.filter(author_id=author)
         # Top-level comments only; replies are nested under their parent.
         return qs.filter(parent__isnull=True)
+
+    def list(self, request, *args, **kwargs):
+        page = self.paginate_queryset(self.get_queryset())
+        # One query for all replies on these documents, grouped by parent, instead of one query per comment.
+        children = defaultdict(list)
+        replies = (Comment.objects.filter(document_id__in={c.document_id for c in page}, parent__isnull=False)
+                   .select_related('author').order_by('created_at'))
+        for reply in replies:
+            children[reply.parent_id].append(reply)
+        serializer = self.get_serializer(page, many=True, context={**self.get_serializer_context(),
+                                                                  'children': children})
+        return self.get_paginated_response(serializer.data)
 
 
 class TagViewSet(viewsets.ModelViewSet):

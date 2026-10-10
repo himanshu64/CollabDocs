@@ -70,11 +70,19 @@ class CollabDocsFlowTests(APITestCase):
         tag = self.client.post('/api/tags/', {'name': 'Python'}).data['id']
         self.assertEqual(self.client.post('/api/tags/', {'name': 'python '}).status_code, 409)
         self.client.post(f'/api/documents/{doc}/tags/', {'tag_ids': [tag]}, format='json')
-        self.assertEqual(len(self.client.get('/api/documents/?tag=python').data), 1)
+        self.assertEqual(self.client.get('/api/documents/?tag=python').data['count'], 1)
 
-        top = self.client.post('/api/comments/', {'document': doc, 'author': self.owner, 'content': 'hi'}).data['id']
-        self.client.post('/api/comments/', {'document': doc, 'author': self.owner, 'content': 'reply', 'parent': top})
-        thread = self.client.get(f'/api/comments/?document={doc}').data
-        self.assertEqual(len(thread), 1)
+        def comment(content, parent=None):
+            body = {'document': doc, 'author': self.owner, 'content': content, **({'parent': parent} if parent else {})}
+            return self.client.post('/api/comments/', body).data['id']
+
+        top = comment('hi')
+        comment('nested', comment('reply', top))
+        comment('second top-level')
+        # Count + page + all replies, regardless of thread depth or size.
+        with self.assertNumQueries(3):
+            thread = self.client.get(f'/api/comments/?document={doc}').data['results']
+        self.assertEqual(len(thread), 2)
         self.assertEqual(thread[0]['replies'][0]['content'], 'reply')
+        self.assertEqual(thread[0]['replies'][0]['replies'][0]['content'], 'nested')
         self.assertEqual(self.client.get('/api/comments/?document=bad').status_code, 400)
