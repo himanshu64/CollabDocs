@@ -79,13 +79,6 @@ List endpoints are paginated (20 per page): the response is `{"count", "next", "
 - The audit signal lives in `core/signals.py` and is connected in `CoreConfig.ready()`. Django sets `_state.adding` to `False` before `post_save` fires, so a `pre_save` receiver records `instance._state.adding` and the `post_save` receiver uses it to log `created` or `updated`.
 - Workspace creation and deactivation, member adds and document deletes also write audit entries, each in the same atomic block as its change. Without authentication the actor is only known for workspace creation (the owner); the other entries have a null actor.
 
-## What could be improved
-
-- There is no authentication. The acting user is passed by ID in the request body, so any caller can act as anyone, and most audit entries have no actor. Token/JWT auth would let the views take the actor from `request.user` and enforce roles everywhere (only admins add members, viewers can't edit or comment). Right now only document creation checks the role. We left auth out because the brief's User model has no password field.
-- Edits are credited to the original author. As the brief specifies, the audit signal records `created_by` as the actor, even when a collaborator made the change. An `updated_by` field (or the authenticated user) would fix both the AuditLog and `DocumentVersion.saved_by`.
-- Each viewset parses its own query params. `django-filter` would replace that with declarative `FilterSet`s. They're hand-written here because the brief asks to show `filter()` with `__gte`, `__lte`, `__in` and `__icontains` lookups.
-- Each version stores the full content. Storing diffs, or capping the version history, would save space for long documents.
-
 ## Demo walkthrough
 
 1. Run the Users and Workspaces folders and watch the middleware lines in the server console.
