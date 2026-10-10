@@ -76,6 +76,19 @@ There is no authentication: the brief's User model has no password, so the actin
 - **Document saves**: `create()` and `update()` wrap the save, the new `DocumentVersion` (`version_number = document.versions.count() + 1`) and the `AuditLog` written by the `post_save` signal in one atomic block. Updates lock the document row first so concurrent saves can't get the same version number.
 - **Audit signal** (`core/signals.py`, connected in `CoreConfig.ready()`): Django sets `_state.adding` to `False` before `post_save` fires, so a `pre_save` receiver records `instance._state.adding` and the `post_save` receiver uses it to log `created` or `updated`.
 
+## What could be improved
+
+- **Authentication and real permissions.** The acting user is passed by ID in the request body, so any caller can act as anyone. Adding token/JWT auth would let the views take the actor from `request.user`, and enforce roles everywhere (only admins add members, viewers can't edit or comment). Right now only document creation checks the role.
+- **Correct actor on updates.** The brief says the audit signal records `created_by` as the actor, so an edit by a collaborator is credited to the original author. An `updated_by` field (or the authenticated user) would fix both the AuditLog and `DocumentVersion.saved_by`.
+- **N+1 queries on threaded comments.** `get_replies` runs one query per comment. For deep threads, fetch every comment for the document in one query and build the tree in Python, or use a recursive CTE.
+- **Pagination.** List endpoints return every row. DRF's `PageNumberPagination` is a one-line setting.
+- **Filtering boilerplate.** Each viewset parses its own query params. `django-filter` would replace that code with declarative `FilterSet`s and validate the inputs.
+- **Wider audit coverage.** Only `Document` saves are logged. Workspace creation, member changes and deletes are not.
+- **Soft delete and `is_active`.** Deletes are permanent. Deactivating a workspace only blocks new documents and members; existing documents can still be edited.
+- **Immutable fields.** `PUT /api/documents/{id}/` can change `workspace` and `created_by`. These should be read-only after creation.
+- **Version storage.** Each version stores the full content. Storing diffs, or capping the version history, would save space for long documents.
+- **Tests.** The suite covers the main flows. It has no test for concurrent updates (the row lock behind `version_number`) or for every 400/404 path.
+
 ## Demo walkthrough
 
 1. Run the Users and Workspaces folders and watch the middleware lines in the server console.
